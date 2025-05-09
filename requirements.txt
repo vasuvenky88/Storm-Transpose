@@ -1,0 +1,11 @@
+streamlit>=1.30.0
+geopandas
+shapely
+numpy
+scipy
+rasterio
+pydeck
+pandas
+fiona
+pyproj
+click<8.1.0  # Optional: Fix for geopandas/rasterio compatibility
