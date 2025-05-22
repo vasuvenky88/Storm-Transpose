@@ -170,7 +170,7 @@ if contour_file and polygon_file:
             
             x_range = max(polygon_bounds[2],contour_bounds[2]) - min(polygon_bounds[0],contour_bounds[0])  # max x - min x
             y_range = max(polygon_bounds[3],contour_bounds[3]) - min(polygon_bounds[1],contour_bounds[1]) # max y - min y
-            bounds = [(-x_range, x_range), (-y_range, y_range), (0, 20)]
+            bounds = [(-x_range, x_range), (-y_range, y_range), (-20, 20)]
 
             # Step 7: Run optimization for each initial guess
             best_result = None
