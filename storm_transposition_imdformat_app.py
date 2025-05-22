@@ -2,12 +2,12 @@
 # -*- coding: utf-8 -*-
 """
 Module Name: Storm_transposition_imdformat_app.py
-Description: A brief description of the module's purpose.
+Description: Calculation of SPS/PMP from storm contour and catchment shape file.
 Author: Vasanthakumar V
 Date Created: 2025-05-05
 Version: 7.0
 """
-#this is main program for streamlit generated exe file shows in GIS maps format
+
 import streamlit as st
 import geopandas as gpd
 import os
@@ -136,7 +136,7 @@ if contour_file and polygon_file:
             total_area += area
 
         average_rainfall = total_weighted_rainfall / total_area if total_area > 0 else 0
-        penalty = 1000 * uncovered_area
+        penalty = 1 * (uncovered_area/1000000)
         return -average_rainfall + penalty
     st.subheader("Optimization")
     if st.button("Run Optimization"):
