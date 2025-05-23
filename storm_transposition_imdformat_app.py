@@ -65,7 +65,7 @@ MMF = st.number_input(
     help="Enter only if project qualifies for PMF, else leave it as 1"
 )
 # User input for number of top contours
-top_n = st.number_input("Enter number of top contours to display:", min_value=1, max_value=100, value=3, step=1)
+top_n = st.number_input("Enter number of top contours for guesses:", min_value=1, max_value=100, value=3, step=1)
 
 
 if contour_file and polygon_file:
