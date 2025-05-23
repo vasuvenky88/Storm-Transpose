@@ -64,6 +64,8 @@ MMF = st.number_input(
     step=0.05,
     help="Enter only if project qualifies for PMF, else leave it as 1"
 )
+# User input for number of top contours
+top_n = st.number_input("Enter number of top contours to display:", min_value=1, max_value=100, value=3, step=1)
 
 
 if contour_file and polygon_file:
@@ -149,7 +151,7 @@ if contour_file and polygon_file:
             contours_sorted = contours.sort_values(['CONTOUR', 'Area'], ascending=[False, False])
 
             # Step 3: Take top 3 polygons
-            top_contours = contours_sorted.head(3)
+            top_contours = contours_sorted.head(top_n)
 
             # Step 4: Find catchment centroid (fixed)
             centroid_catchment = search_poly.centroid
