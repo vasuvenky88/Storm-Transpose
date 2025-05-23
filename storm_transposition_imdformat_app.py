@@ -67,6 +67,9 @@ MMF = st.number_input(
 # User input for number of top contours
 top_n = st.number_input("Enter number of top contours for guesses:", min_value=1, max_value=100, value=3, step=1)
 
+if "optimization_result" not in st.session_state:
+    st.session_state.optimization_result = None
+
 
 if contour_file and polygon_file:
     with st.spinner("Reading shapefiles..."):
@@ -195,190 +198,201 @@ if contour_file and polygon_file:
             st.write(f"✅ Optimal X Offset: {best_x:.2f} m")
             st.write(f"✅ Optimal Y Offset: {best_y:.2f} m")
             st.write(f"✅ Optimal Rotation: {best_theta:.2f}°")
+            
 
             best_poly = rotate(search_poly, best_theta, origin='centroid', use_radians=False)
             best_poly = translate(best_poly, xoff=best_x, yoff=best_y)
             gdf_result = gpd.GeoDataFrame({'geometry': [best_poly]}, crs=selected_epsg)
-
-    
-
-        
-        # Move and rotate contours in reverse: from optimized position to original
-        def reverse_transform_geometry(geom, x_shift, y_shift, theta_deg, origin_point):
-            # Translate back
-            geom = translate(geom, xoff=-x_shift, yoff=-y_shift)
-            # Rotate back
-            geom = rotate(geom, -theta_deg, origin=origin_point, use_radians=False)
-            return geom
-
-        # Preserve original contours for map display
-        original_contours = contours.copy()
-
-        # Apply reverse transformation to get "shifted storm" visualization
-        reversed_contours = contours.copy()
-        reversed_contours['geometry'] = reversed_contours['geometry'].apply(
-            lambda geom: reverse_transform_geometry(geom, best_x, best_y, best_theta, origin_point=search_poly.centroid)
-        )
-
-
-        # Reproject all to EPSG:4326 for map display
-        contours_4326 = contours.to_crs(epsg=4326)
-        original_contours_4326 = original_contours.to_crs(epsg=4326)
-        reversed_contours_4326 = reversed_contours.to_crs(epsg=4326)
-        original_poly_4326 = polygon.to_crs(epsg=4326)
-        best_poly_4326 = gdf_result.to_crs(epsg=4326)
-
-        # Add rainfall values as a tooltip-ready column if not present
-        if 'CONTOUR' not in contours_4326.columns:
-            contours_4326['CONTOUR'] = [0] * len(contours_4326)
-        
-        
-        #Sorting higher rainfall on last and lower rainfall on bottom to avoid overlap
-        def detect_and_sort_polygons(gdf):
-            # Convert GeoDataFrame to GeoJSON-like dict to access features
-            geojson_data = gdf.__geo_interface__['features']
-            
-            # Convert features into shapely polygons
-            polygons = [shape(feature['geometry']) for feature in geojson_data]
-            
-            # Detect overlaps
-            overlaps = []
-            for i, poly1 in enumerate(polygons):
-                for j, poly2 in enumerate(polygons):
-                    if i != j and poly1.intersects(poly2):
-                        overlaps.append((i, j))  # Store index pairs of overlapping polygons
-            
-            # Sort the features by area (larger ones first)
-            geojson_data.sort(key=lambda feature: shape(feature['geometry']).area, reverse=True)
-            
-            # Return sorted features only
-            return geojson_data
-        original_contours_4326 = detect_and_sort_polygons(original_contours_4326)
-        reversed_contours_4326 = detect_and_sort_polygons(reversed_contours_4326)
-        original_poly_4326 = detect_and_sort_polygons(original_poly_4326)
-        
-        # Helper function to generate layers
-        def geojson_layer(gdf, fill_color, name="layer"):
-            return pdk.Layer(
-                "GeoJsonLayer",
-                data= gdf,
-                get_fill_color=fill_color,
-                get_line_color=[0, 0, 0, 255],
-                get_line_width=1,
-                pickable=True,
-                filled=True,
-                auto_highlight=True,
-                name=name
-            )
-
-        # Define layers
-        #contour_layer = geojson_layer(contours_4326, [0, 0, 255, 80], "Rainfall Contour")
-        original_layer = geojson_layer(original_poly_4326, [0, 255, 0, 150], "Original Catchment")
-        #optimized_layer = geojson_layer(best_poly_4326, [255, 0, 0, 150], "Optimized Catchment")
-
-        # Center the map
-        centroid = contours_4326.unary_union.centroid
-        view_state = pdk.ViewState(
-            latitude=centroid.y,
-            longitude=centroid.x,
-            zoom=8,
-            pitch=0
-        )
-
-        # Display map
-        st.subheader("Map Visualization")
-        
-        
-        st.pydeck_chart(pdk.Deck(
-            #layers=[contour_layer, original_layer, optimized_layer],
-            layers=[
-                original_layer,
-                geojson_layer(reversed_contours_4326, [255, 100, 0, 60], "Shifted Storm Contours"),
-                geojson_layer(original_contours_4326, [100, 100, 255, 60], "Original Rainfall Contours")   
-            ],
-            initial_view_state=view_state,
-            tooltip={"text": "Rainfall: {CONTOUR}"}
-        ))
-        #Display of shapefiles block END....
-        st.markdown("""
-        <style>
-        .legend-box {
-            display: flex;
-            gap: 30px;
-            margin-top: 10px;
-        }
-        .legend-item {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        .legend-color {
-            width: 20px;
-            height: 20px;
-            display: inline-block;
-        }
-        </style>
-
-        <div class="legend-box">
-            <div class="legend-item">
-                <div class="legend-color" style="background-color: rgba(0, 255, 0, 0.6); border: 1px solid #000;"></div>
-                <span>Original Catchment</span>
-            </div>
-            <div class="legend-item">
-                <div class="legend-color" style="background-color: rgba(255, 100, 0, 0.6); border: 1px solid #000;"></div>
-                <span>Shifted Storm Contours</span>
-            </div>
-            <div class="legend-item">
-                <div class="legend-color" style="background-color: rgba(100, 100, 255, 0.6); border: 1px solid #000;"></div>
-                <span>Original Rainfall Contours</span>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        st.subheader("Design Storm Precipitation")
-        # IDW Interpolation
-        points, values = [], []
-        for _, row in contours.iterrows():
-            geom = row.geometry
-            rain = row['CONTOUR']
-            coords = list(geom.exterior.coords) if geom.geom_type == 'Polygon' else list(geom.coords)
-            for coord in coords:
-                points.append(coord)
-                values.append(rain)
-        points, values = np.array(points), np.array(values)
-
-        minx, miny, maxx, maxy = contours.total_bounds
-        grid_x, grid_y = np.mgrid[minx:maxx:complex(0, int((maxx - minx)/resolution)),
-                                  miny:maxy:complex(0, int((maxy - miny)/resolution))]
-        grid_points = np.vstack((grid_x.ravel(), grid_y.ravel())).T
-        tree = cKDTree(points)
-        k, p = 8, 2
-        dists, idx = tree.query(grid_points, k=k)
-        weights = 1 / (dists ** p)
-        weights[dists == 0] = 1e12
-        interp_vals = np.sum(weights * values[idx], axis=1) / np.sum(weights, axis=1)
-        interp_raster = interp_vals.reshape(grid_x.shape)
-
-        transform = from_origin(minx, maxy, resolution, resolution)
-        with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
-            interpolated_path = tmp.name
-            with rasterio.open(interpolated_path, 'w', driver='GTiff',
-                               height=interp_raster.shape[1], width=interp_raster.shape[0],
-                               count=1, dtype='float32', crs=selected_epsg, transform=transform) as dst:
-                dst.write(np.flipud(interp_raster.T), 1)
-
-        with rasterio.open(interpolated_path) as src:
-            out_image, _ = mask(src, gdf_result.geometry, crop=True, filled=True, nodata=np.nan)
-
-        data = out_image[0]
-        mean_rainfall = np.nanmean(data)
-        #st.metric("Standard Project Storm (SPS)", f"{mean_rainfall:.2f} mm")
-        if MMF > 1.0:
-            mean_rainfall *= MMF
-            st.metric("Probable Maximum Precipitation (PMP)", f"{mean_rainfall:.2f} mm")
-        else:
-            st.metric("Standard Project Storm (SPS)", f"{mean_rainfall:.2f} mm")
-
+            st.session_state.optimization_result = {
+                "best_x": best_x,
+                "best_y": best_y,
+                "best_theta": best_theta,
+                "best_poly": best_poly,
+            }
 else:
     st.info("Please upload both contour and catchment shapefiles (.zip format).")
+
+if st.session_state.optimization_result:
+    result = st.session_state.optimization_result
+    best_x = result["best_x"]
+    best_y = result["best_y"]
+    best_theta = result["best_theta"]
+    best_poly = result["best_poly"]
+    gdf_result = gpd.GeoDataFrame({'geometry': [best_poly]}, crs=selected_epsg)
+    
+    # Move and rotate contours in reverse: from optimized position to original
+    def reverse_transform_geometry(geom, x_shift, y_shift, theta_deg, origin_point):
+        # Translate back
+        geom = translate(geom, xoff=-x_shift, yoff=-y_shift)
+        # Rotate back
+        geom = rotate(geom, -theta_deg, origin=origin_point, use_radians=False)
+        return geom
+
+    # Preserve original contours for map display
+    original_contours = contours.copy()
+
+    # Apply reverse transformation to get "shifted storm" visualization
+    reversed_contours = contours.copy()
+    reversed_contours['geometry'] = reversed_contours['geometry'].apply(
+        lambda geom: reverse_transform_geometry(geom, best_x, best_y, best_theta, origin_point=search_poly.centroid)
+    )
+
+
+    # Reproject all to EPSG:4326 for map display
+    contours_4326 = contours.to_crs(epsg=4326)
+    original_contours_4326 = original_contours.to_crs(epsg=4326)
+    reversed_contours_4326 = reversed_contours.to_crs(epsg=4326)
+    original_poly_4326 = polygon.to_crs(epsg=4326)
+    best_poly_4326 = gdf_result.to_crs(epsg=4326)
+
+    # Add rainfall values as a tooltip-ready column if not present
+    if 'CONTOUR' not in contours_4326.columns:
+        contours_4326['CONTOUR'] = [0] * len(contours_4326)
+    
+    
+    #Sorting higher rainfall on last and lower rainfall on bottom to avoid overlap
+    def detect_and_sort_polygons(gdf):
+        # Convert GeoDataFrame to GeoJSON-like dict to access features
+        geojson_data = gdf.__geo_interface__['features']
+        
+        # Convert features into shapely polygons
+        polygons = [shape(feature['geometry']) for feature in geojson_data]
+        
+        # Detect overlaps
+        overlaps = []
+        for i, poly1 in enumerate(polygons):
+            for j, poly2 in enumerate(polygons):
+                if i != j and poly1.intersects(poly2):
+                    overlaps.append((i, j))  # Store index pairs of overlapping polygons
+        
+        # Sort the features by area (larger ones first)
+        geojson_data.sort(key=lambda feature: shape(feature['geometry']).area, reverse=True)
+        
+        # Return sorted features only
+        return geojson_data
+    original_contours_4326 = detect_and_sort_polygons(original_contours_4326)
+    reversed_contours_4326 = detect_and_sort_polygons(reversed_contours_4326)
+    original_poly_4326 = detect_and_sort_polygons(original_poly_4326)
+    
+    # Helper function to generate layers
+    def geojson_layer(gdf, fill_color, name="layer"):
+        return pdk.Layer(
+            "GeoJsonLayer",
+            data= gdf,
+            get_fill_color=fill_color,
+            get_line_color=[0, 0, 0, 255],
+            get_line_width=1,
+            pickable=True,
+            filled=True,
+            auto_highlight=True,
+            name=name
+        )
+
+    # Define layers
+    #contour_layer = geojson_layer(contours_4326, [0, 0, 255, 80], "Rainfall Contour")
+    original_layer = geojson_layer(original_poly_4326, [0, 255, 0, 150], "Original Catchment")
+    #optimized_layer = geojson_layer(best_poly_4326, [255, 0, 0, 150], "Optimized Catchment")
+
+    # Center the map
+    centroid = contours_4326.unary_union.centroid
+    view_state = pdk.ViewState(
+        latitude=centroid.y,
+        longitude=centroid.x,
+        zoom=8,
+        pitch=0
+    )
+
+    # Display map
+    st.subheader("Map Visualization")
+    
+    
+    st.pydeck_chart(pdk.Deck(
+        #layers=[contour_layer, original_layer, optimized_layer],
+        layers=[
+            original_layer,
+            geojson_layer(reversed_contours_4326, [255, 100, 0, 60], "Shifted Storm Contours"),
+            geojson_layer(original_contours_4326, [100, 100, 255, 60], "Original Rainfall Contours")   
+        ],
+        initial_view_state=view_state,
+        tooltip={"text": "Rainfall: {CONTOUR}"}
+    ))
+    #Display of shapefiles block END....
+    st.markdown("""
+    <style>
+    .legend-box {
+        display: flex;
+        gap: 30px;
+        margin-top: 10px;
+    }
+    .legend-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .legend-color {
+        width: 20px;
+        height: 20px;
+        display: inline-block;
+    }
+    </style>
+
+    <div class="legend-box">
+        <div class="legend-item">
+            <div class="legend-color" style="background-color: rgba(0, 255, 0, 0.6); border: 1px solid #000;"></div>
+            <span>Original Catchment</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background-color: rgba(255, 100, 0, 0.6); border: 1px solid #000;"></div>
+            <span>Shifted Storm Contours</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background-color: rgba(100, 100, 255, 0.6); border: 1px solid #000;"></div>
+            <span>Original Rainfall Contours</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.subheader("Design Storm Precipitation")
+    # IDW Interpolation
+    points, values = [], []
+    for _, row in contours.iterrows():
+        geom = row.geometry
+        rain = row['CONTOUR']
+        coords = list(geom.exterior.coords) if geom.geom_type == 'Polygon' else list(geom.coords)
+        for coord in coords:
+            points.append(coord)
+            values.append(rain)
+    points, values = np.array(points), np.array(values)
+
+    minx, miny, maxx, maxy = contours.total_bounds
+    grid_x, grid_y = np.mgrid[minx:maxx:complex(0, int((maxx - minx)/resolution)),
+                              miny:maxy:complex(0, int((maxy - miny)/resolution))]
+    grid_points = np.vstack((grid_x.ravel(), grid_y.ravel())).T
+    tree = cKDTree(points)
+    k, p = 8, 2
+    dists, idx = tree.query(grid_points, k=k)
+    weights = 1 / (dists ** p)
+    weights[dists == 0] = 1e12
+    interp_vals = np.sum(weights * values[idx], axis=1) / np.sum(weights, axis=1)
+    interp_raster = interp_vals.reshape(grid_x.shape)
+
+    transform = from_origin(minx, maxy, resolution, resolution)
+    with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
+        interpolated_path = tmp.name
+        with rasterio.open(interpolated_path, 'w', driver='GTiff',
+                           height=interp_raster.shape[1], width=interp_raster.shape[0],
+                           count=1, dtype='float32', crs=selected_epsg, transform=transform) as dst:
+            dst.write(np.flipud(interp_raster.T), 1)
+
+    with rasterio.open(interpolated_path) as src:
+        out_image, _ = mask(src, gdf_result.geometry, crop=True, filled=True, nodata=np.nan)
+
+    data = out_image[0]
+    mean_rainfall = np.nanmean(data)
+    #st.metric("Standard Project Storm (SPS)", f"{mean_rainfall:.2f} mm")
+    if MMF > 1.0:
+        mean_rainfall *= MMF
+        st.metric("Probable Maximum Precipitation (PMP)", f"{mean_rainfall:.2f} mm")
+    else:
+        st.metric("Standard Project Storm (SPS)", f"{mean_rainfall:.2f} mm")
 
