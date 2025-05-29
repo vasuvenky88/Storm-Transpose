@@ -26,7 +26,6 @@ import pydeck as pdk
 import pandas as pd
 import json
 import re
-import io
 
 st.set_page_config(layout="wide", page_title="Storm Transposition Optimizer")
 
@@ -46,87 +45,45 @@ def line_to_polygon(geom):
 def load_shapefile(uploaded_file):
     return gpd.read_file(uploaded_file)
 
-
-# Initialize session state for inputs if not present
-if "contour_file_bytes" not in st.session_state:
-    st.session_state.contour_file_bytes = None
-if "polygon_file_bytes" not in st.session_state:
-    st.session_state.polygon_file_bytes = None
-
-if "resolution" not in st.session_state:
-    st.session_state.resolution = 1000
-if "utm_zone" not in st.session_state:
-    st.session_state.utm_zone = 43
-if "MMF" not in st.session_state:
-    st.session_state.MMF = 1.0
-if "top_n" not in st.session_state:
-    st.session_state.top_n = 3
+# --------------------------
+# Sidebar Inputs
+# --------------------------
 
 st.sidebar.title("Upload Input Shapefiles")
 
-# Upload contour shapefile
-uploaded_contour = st.sidebar.file_uploader("Upload Rainfall Contour Shapefile (.shp, .zip):", type=["zip"], key="contour_uploader")
+contour_file = st.sidebar.file_uploader("Upload Rainfall Contour Shapefile (.shp, .zip):", type=["zip"])
+polygon_file = st.sidebar.file_uploader("Upload Catchment Shapefile (.shp, .zip):", type=["zip"])
 
-if uploaded_contour is not None:
-    st.session_state.contour_file_bytes = uploaded_contour.getvalue()
-elif st.session_state.contour_file_bytes is not None:
-    # To keep the file after rerun, show info that file loaded from session state
-    st.sidebar.info("Contour file loaded from previous upload.")
-
-# Upload catchment shapefile
-uploaded_polygon = st.sidebar.file_uploader("Upload Catchment Shapefile (.shp, .zip):", type=["zip"], key="polygon_uploader")
-
-if uploaded_polygon is not None:
-    st.session_state.polygon_file_bytes = uploaded_polygon.getvalue()
-elif st.session_state.polygon_file_bytes is not None:
-    st.sidebar.info("Catchment file loaded from previous upload.")
-
-# Inputs with default values from session state
-st.session_state.resolution = st.sidebar.slider(
-    "Interpolation Resolution (m)", 500, 5000, st.session_state.resolution, step=500)
-
-st.session_state.utm_zone = st.sidebar.selectbox(
-    "Select UTM Zone", options=[43, 44], index=[43, 44].index(st.session_state.utm_zone),
-    format_func=lambda z: f"UTM Zone {z}"
-)
-
-selected_epsg = 32600 + st.session_state.utm_zone
-
-st.session_state.MMF = st.sidebar.number_input(
+resolution = st.sidebar.slider("Interpolation Resolution (m)", 500, 5000, 1000, step=500)
+utm_zone = st.sidebar.selectbox("Select UTM Zone", options=[43, 44], index=0, format_func=lambda z: f"UTM Zone {z}")
+selected_epsg = 32600 + utm_zone
+MMF = st.number_input(
     "Enter Moisture Maximisation factor Factor (MMF) (Only for PMP, IF SPS leave it as 1)",
     min_value=1.0,
-    value=st.session_state.MMF,
+    value=1.0,
     step=0.05,
     help="Enter only if project qualifies for PMF, else leave it as 1"
 )
-
-st.session_state.top_n = st.sidebar.number_input(
-    "Enter number of top contours for guesses:", min_value=1, max_value=100,
-    value=st.session_state.top_n, step=1
-)
-
-# Now read the shapefiles from bytes if available
-contours, polygon = None, None
-
-
+# User input for number of top contours
+top_n = st.number_input("Enter number of top contours for guesses:", min_value=1, max_value=100, value=3, step=1)
 
 if "optimization_result" not in st.session_state:
     st.session_state.optimization_result = None
 
 
-if st.session_state.contour_file_bytes and st.session_state.polygon_file_bytes:
-    with tempfile.TemporaryDirectory() as tmpdir:
-        contour_path = os.path.join(tmpdir, "contour.zip")
-        catchment_path = os.path.join(tmpdir, "catchment.zip")
-        with open(contour_path, "wb") as f:
-            f.write(st.session_state.contour_file_bytes)
-        with open(catchment_path, "wb") as f:
-            f.write(st.session_state.polygon_file_bytes)
-        contours = gpd.read_file(f"zip://{contour_path}")
-        polygon = gpd.read_file(f"zip://{catchment_path}")
-        resolution = st.session_state.resolution
-        top_n = st.session_state.top_n
-        MMF = st.session_state.MMF
+if contour_file and polygon_file:
+    with st.spinner("Reading shapefiles..."):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            contour_path = os.path.join(tmpdir, "contour.zip")
+            catchment_path = os.path.join(tmpdir, "catchment.zip")
+
+            with open(contour_path, "wb") as f:
+                f.write(contour_file.getbuffer())
+            with open(catchment_path, "wb") as f:
+                f.write(polygon_file.getbuffer())
+
+            contours = gpd.read_file(f"zip://{contour_path}")
+            polygon = gpd.read_file(f"zip://{catchment_path}")
 
     # Reproject
     contours = contours.to_crs(epsg=32643)
