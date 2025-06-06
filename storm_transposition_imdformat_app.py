@@ -236,8 +236,83 @@ if st.session_state.optimization_result:
     reversed_contours['geometry'] = reversed_contours['geometry'].apply(
         lambda geom: reverse_transform_geometry(geom, best_x, best_y, best_theta, origin_point=search_poly.centroid)
     )
+    
+    st.subheader("Design Storm Precipitation")
+    # IDW Interpolation
+    points, values = [], []
+    for _, row in contours.iterrows():
+        geom = row.geometry
+        rain = row['CONTOUR']
+        coords = list(geom.exterior.coords) if geom.geom_type == 'Polygon' else list(geom.coords)
+        for coord in coords:
+            points.append(coord)
+            values.append(rain)
+    points, values = np.array(points), np.array(values)
 
+    minx, miny, maxx, maxy = contours.total_bounds
+    grid_x, grid_y = np.mgrid[minx:maxx:complex(0, int((maxx - minx)/resolution)),
+                              miny:maxy:complex(0, int((maxy - miny)/resolution))]
+    grid_points = np.vstack((grid_x.ravel(), grid_y.ravel())).T
+    tree = cKDTree(points)
+    k, p = 3, 2
+    dists, idx = tree.query(grid_points, k=k)
+    weights = 1 / (dists ** p)
+    weights[dists == 0] = 1e12
+    interp_vals = np.sum(weights * values[idx], axis=1) / np.sum(weights, axis=1)
+    interp_raster = interp_vals.reshape(grid_x.shape)
 
+    transform = from_origin(minx, maxy, resolution, resolution)
+    with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
+        interpolated_path = tmp.name
+        with rasterio.open(interpolated_path, 'w', driver='GTiff',
+                           height=interp_raster.shape[1], width=interp_raster.shape[0],
+                           count=1, dtype='float32', crs=selected_epsg, transform=transform) as dst:
+            dst.write(np.flipud(interp_raster.T), 1)
+
+    with rasterio.open(interpolated_path) as src:
+        out_image, _ = mask(src, gdf_result.geometry, crop=True, filled=True, nodata=np.nan)
+
+    data = out_image[0]
+    mean_rainfall = np.nanmean(data)
+    #st.metric("Standard Project Storm (SPS)", f"{mean_rainfall:.2f} mm")
+    if MMF > 1.0:
+        mean_rainfall *= MMF
+        st.metric("Probable Maximum Precipitation (PMP)", f"{mean_rainfall:.2f} mm")
+    else:
+        st.metric("Standard Project Storm (SPS)", f"{mean_rainfall:.2f} mm")
+    #New Block starts .............
+    st.subheader("Export Results")
+    output_folder = st.text_input("Enter local output folder path to save results (e.g., C:/Users/Name/Documents/Output):")
+
+    if output_folder and os.path.isdir(output_folder):
+        try:
+            # Save reversed contours
+            reversed_contours_path = os.path.join(output_folder, "reversed_contours.shp")
+            reversed_contours.to_file(reversed_contours_path)
+            
+            # Save reversed contours
+            original_contours_path = os.path.join(output_folder, "original_contours.shp")
+            original_contours.to_file(original_contours_path)
+
+            # Save interpolated raster
+            final_raster_path = os.path.join(output_folder, "interpolated_rainfall.tif")
+            with rasterio.open(interpolated_path) as src:
+                profile = src.profile
+                data_to_write = src.read(1)
+
+            with rasterio.open(final_raster_path, 'w', **profile) as dst:
+                dst.write(data_to_write, 1)
+
+            st.success(f"✅ Files saved to {output_folder}")
+            st.write(f"- Reversed contours: `{reversed_contours_path}`")
+            st.write(f"- Interpolated rainfall raster: `{final_raster_path}`")
+        except Exception as e:
+            st.error(f"Error saving files: {e}")
+    elif output_folder:
+        st.warning("⚠️ The specified folder path does not exist. Please check the path.")
+
+    # New Block ends .............
+        
     # Reproject all to EPSG:4326 for map display
     contours_4326 = contours.to_crs(epsg=4326)
     original_contours_4326 = original_contours.to_crs(epsg=4326)
@@ -274,6 +349,8 @@ if st.session_state.optimization_result:
     reversed_contours_4326 = detect_and_sort_polygons(reversed_contours_4326)
     original_poly_4326 = detect_and_sort_polygons(original_poly_4326)
     
+    
+    
     # Helper function to generate layers
     def geojson_layer(gdf, fill_color, name="layer"):
         return pdk.Layer(
@@ -301,7 +378,7 @@ if st.session_state.optimization_result:
         zoom=8,
         pitch=0
     )
-
+    
     # Display map
     st.subheader("Map Visualization")
     
@@ -352,47 +429,6 @@ if st.session_state.optimization_result:
     </div>
     """, unsafe_allow_html=True)
 
-    st.subheader("Design Storm Precipitation")
-    # IDW Interpolation
-    points, values = [], []
-    for _, row in contours.iterrows():
-        geom = row.geometry
-        rain = row['CONTOUR']
-        coords = list(geom.exterior.coords) if geom.geom_type == 'Polygon' else list(geom.coords)
-        for coord in coords:
-            points.append(coord)
-            values.append(rain)
-    points, values = np.array(points), np.array(values)
-
-    minx, miny, maxx, maxy = contours.total_bounds
-    grid_x, grid_y = np.mgrid[minx:maxx:complex(0, int((maxx - minx)/resolution)),
-                              miny:maxy:complex(0, int((maxy - miny)/resolution))]
-    grid_points = np.vstack((grid_x.ravel(), grid_y.ravel())).T
-    tree = cKDTree(points)
-    k, p = 8, 2
-    dists, idx = tree.query(grid_points, k=k)
-    weights = 1 / (dists ** p)
-    weights[dists == 0] = 1e12
-    interp_vals = np.sum(weights * values[idx], axis=1) / np.sum(weights, axis=1)
-    interp_raster = interp_vals.reshape(grid_x.shape)
-
-    transform = from_origin(minx, maxy, resolution, resolution)
-    with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
-        interpolated_path = tmp.name
-        with rasterio.open(interpolated_path, 'w', driver='GTiff',
-                           height=interp_raster.shape[1], width=interp_raster.shape[0],
-                           count=1, dtype='float32', crs=selected_epsg, transform=transform) as dst:
-            dst.write(np.flipud(interp_raster.T), 1)
-
-    with rasterio.open(interpolated_path) as src:
-        out_image, _ = mask(src, gdf_result.geometry, crop=True, filled=True, nodata=np.nan)
-
-    data = out_image[0]
-    mean_rainfall = np.nanmean(data)
-    #st.metric("Standard Project Storm (SPS)", f"{mean_rainfall:.2f} mm")
-    if MMF > 1.0:
-        mean_rainfall *= MMF
-        st.metric("Probable Maximum Precipitation (PMP)", f"{mean_rainfall:.2f} mm")
-    else:
-        st.metric("Standard Project Storm (SPS)", f"{mean_rainfall:.2f} mm")
+    
+    
 
