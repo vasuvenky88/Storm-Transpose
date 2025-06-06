@@ -280,38 +280,6 @@ if st.session_state.optimization_result:
         st.metric("Probable Maximum Precipitation (PMP)", f"{mean_rainfall:.2f} mm")
     else:
         st.metric("Standard Project Storm (SPS)", f"{mean_rainfall:.2f} mm")
-    #New Block starts .............
-    st.subheader("Export Results")
-    output_folder = st.text_input("Enter local output folder path to save results (e.g., C:/Users/Name/Documents/Output):")
-
-    if output_folder and os.path.isdir(output_folder):
-        try:
-            # Save reversed contours
-            reversed_contours_path = os.path.join(output_folder, "reversed_contours.shp")
-            reversed_contours.to_file(reversed_contours_path)
-            
-            # Save reversed contours
-            original_contours_path = os.path.join(output_folder, "original_contours.shp")
-            original_contours.to_file(original_contours_path)
-
-            # Save interpolated raster
-            final_raster_path = os.path.join(output_folder, "interpolated_rainfall.tif")
-            with rasterio.open(interpolated_path) as src:
-                profile = src.profile
-                data_to_write = src.read(1)
-
-            with rasterio.open(final_raster_path, 'w', **profile) as dst:
-                dst.write(data_to_write, 1)
-
-            st.success(f"✅ Files saved to {output_folder}")
-            st.write(f"- Reversed contours: `{reversed_contours_path}`")
-            st.write(f"- Interpolated rainfall raster: `{final_raster_path}`")
-        except Exception as e:
-            st.error(f"Error saving files: {e}")
-    elif output_folder:
-        st.warning("⚠️ The specified folder path does not exist. Please check the path.")
-
-    # New Block ends .............
         
     # Reproject all to EPSG:4326 for map display
     contours_4326 = contours.to_crs(epsg=4326)
